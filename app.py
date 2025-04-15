@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -14,9 +15,11 @@ st.title("Customer Churn Prediction App")
 uploaded_file = st.file_uploader("Upload your customer data (CSV)", type=["csv"])
 
 # Load the pre-trained model
+
 @st.cache_resource
 def load_model(model_path="churn_model.pkl"):
     try:
+        model_path = os.path.join(os.path.dirname(__file__), model_path)
         with open(model_path, "rb") as file:
             model = pickle.load(file)
         return model
