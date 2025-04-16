@@ -1,4 +1,3 @@
-import os
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -6,33 +5,32 @@ import pickle
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.preprocessing import StandardScaler
-from io import StringIO
+from textblob import TextBlob
 
-# Set page title
-st.title("Customer Churn Prediction App")
+# Dashboard layout
+st.sidebar.title("Customer Churn Dashboard")
+st.sidebar.markdown("Upload datasets and explore churn insights.")
 
-# File uploader for CSV
-uploaded_file = st.file_uploader("Upload your customer data (CSV)", type=["csv"])
+# File uploaders
+uploaded_file = st.sidebar.file_uploader("Upload customer data (CSV)", type=["csv"], key="main_data")
+feedback_file = st.sidebar.file_uploader("Upload feedback data (CSV)", type=["csv"], key="feedback_data")
 
 # Load the pre-trained model
-
 @st.cache_resource
-def load_model(model_path="churn_model.pkl"):
+def load_model(model_path="churn_model_with_sentiment.pkl"):
     try:
-        model_path = os.path.join(os.path.dirname(__file__), model_path)
         with open(model_path, "rb") as file:
             model = pickle.load(file)
         return model
     except FileNotFoundError:
-        st.error("Model file not found. Please ensure 'churn_model.pkl' is in the directory.")
+        st.error("Model file not found. Please ensure 'churn_model_with_sentiment.pkl' is in the directory.")
         return None
 
 model = load_model()
 
-# Function to preprocess the uploaded data to match notebook's pipeline
-def preprocess_data(df):
+# Function to preprocess the uploaded data
+def preprocess_data(df, global_sentiment=None):
     df_processed = df.copy()
-    # Drop columns only if they exist
     columns_to_drop = ["RowNumber", "CustomerId", "Surname", "Exited"]
     df_processed = df_processed.drop(columns=[col for col in columns_to_drop if col in df_processed.columns], errors='ignore')
     
@@ -49,6 +47,27 @@ def preprocess_data(df):
         if col in df_processed.columns:
             df_processed = pd.get_dummies(df_processed, columns=[col], prefix=[col], drop_first=True)
     
+    # Define expected features to match the model's training order
+    expected_features = [
+        'CreditScore', 'Age', 'Tenure', 'Balance', 'NumOfProducts', 'HasCrCard',
+        'IsActiveMember', 'EstimatedSalary', 'Geography_Germany', 'Geography_Spain',
+        'Gender_Male', 'Sentiment_Polarity'
+    ]
+    if global_sentiment is not None:
+        df_processed["Sentiment_Polarity"] = global_sentiment
+    else:
+        df_processed["Sentiment_Polarity"] = 0  # Default if sentiment is missing
+    # Add missing columns with default value 0
+    for col in expected_features:
+        if col not in df_processed.columns:
+            df_processed[col] = 0
+    
+    # Add global sentiment if available
+   
+    
+    # Reorder to expected features
+    df_processed = df_processed[expected_features]
+    
     # Scale numeric features
     scaler = StandardScaler()
     numeric_cols = ["CreditScore", "Age", "Tenure", "Balance", "NumOfProducts", "EstimatedSalary"]
@@ -56,36 +75,30 @@ def preprocess_data(df):
         if col in df_processed.columns:
             df_processed[col] = scaler.fit_transform(df_processed[[col]])
     
-    # Ensure binary columns (HasCrCard, IsActiveMember) are kept as is
-    binary_cols = ["HasCrCard", "IsActiveMember"]
+    # Ensure binary columns
+    binary_cols = ["HasCrCard", "IsActiveMember", "Geography_Germany", "Geography_Spain", "Gender_Male"]
     for col in binary_cols:
         if col in df_processed.columns:
             df_processed[col] = df_processed[col].astype(int)
     
-    # Define expected features based on one-hot encoding
-    expected_features = [
-        "CreditScore", "Age", "Tenure", "Balance", "NumOfProducts", "EstimatedSalary",
-        "Geography_Spain", "Geography_Germany", "Gender_Male", "HasCrCard", "IsActiveMember"
-    ]  # 11 features; adjust to 12 with exact notebook output
-    if len(expected_features) < 12:
-        expected_features.append("Extra_Feature")  # Replace with actual feature from notebook
-    
-    # Reorder and add missing columns with zeros
-    missing_cols = [col for col in expected_features if col not in df_processed.columns]
-    for col in missing_cols:
-        df_processed[col] = 0
-    df_processed = df_processed[expected_features]
-    
-    # Debug: Check the shape
-    st.write("Processed feature shape:", df_processed.shape)
-    
     return df_processed, {}
 
-# Function to predict churn and get probabilities
+# Function to analyze sentiment from "feedback" column
+def analyze_sentiment(feedback_df):
+    if feedback_df is not None and "feedback" in feedback_df.columns:
+        feedback_df["Sentiment_Polarity"] = feedback_df["feedback"].apply(lambda x: TextBlob(str(x)).sentiment.polarity)
+        global_sentiment = feedback_df["Sentiment_Polarity"].mean()
+        if "churn" in feedback_df.columns:
+            global_churn = feedback_df["churn"].mean()
+            return global_sentiment, global_churn
+        return global_sentiment, None
+    return None, None
+
+# Function to predict churn
 def predict_churn(model, data):
     try:
         predictions = model.predict(data)
-        probabilities = model.predict_proba(data)[:, 1]  # Probability of churn (class 1)
+        probabilities = model.predict_proba(data)[:, 1]
         return predictions, probabilities
     except AttributeError:
         st.error("Model does not support predictions.")
@@ -98,140 +111,164 @@ def create_age_groups(df):
     df['AgeGroup'] = pd.cut(df['Age'], bins=bins, labels=labels, right=False)
     return df
 
+# Main dashboard content
 if uploaded_file is not None and model is not None:
     try:
-        df = pd.read_csv(uploaded_file)
-        st.write("Uploaded Data Preview:")
+        # Try different encodings for uploaded_file
+        encoding_tried = False
+        try:
+            df = pd.read_csv(uploaded_file)
+        except UnicodeDecodeError:
+            encoding_tried = True
+            try:
+                df = pd.read_csv(uploaded_file, encoding='Windows-1252')
+            except UnicodeDecodeError:
+                df = pd.read_csv(uploaded_file, encoding='latin-1')
+        
+        st.markdown("### Data Preview")
         st.dataframe(df.head())
         
-        # Preprocess the data
-        df_processed, _ = preprocess_data(df)
+        global_sentiment = None
+        global_churn = None
+        if feedback_file is not None:
+            try:
+                feedback_df = pd.read_csv(feedback_file)
+            except UnicodeDecodeError:
+                try:
+                    feedback_df = pd.read_csv(feedback_file, encoding='Windows-1252')
+                except UnicodeDecodeError:
+                    feedback_df = pd.read_csv(feedback_file, encoding='latin-1')
+            
+            st.markdown("### Feedback Data Preview")
+            st.dataframe(feedback_df.head())
+            global_sentiment, global_churn = analyze_sentiment(feedback_df)
+            if global_sentiment is not None:
+                df["Feedback_Churn"] = global_churn if global_churn is not None else -1
         
-        # Predict churn
+        df_processed, _ = preprocess_data(df, global_sentiment)
         predictions, probabilities = predict_churn(model, df_processed)
         
         if predictions is not None:
-            # Add predictions and probabilities to the original dataframe
             df["Churn Prediction"] = predictions
             df["Churn Probability"] = probabilities
-            
-            # Map predictions to labels
             df["Churn Prediction"] = df["Churn Prediction"].map({0: "Stay", 1: "Churn"})
-            
-            # Create age groups
             df = create_age_groups(df)
             
-            # Display results (avoiding duplicate columns)
-            st.subheader("Prediction Results")
-            # Select all columns, ensuring no duplicates by using a set or unique list
-            all_columns = ["Churn Prediction", "Churn Probability"] + [col for col in df.columns if col not in ["Churn Prediction", "Churn Probability"]]
+            st.markdown("### Prediction Results")
+            all_columns = ["Churn Prediction", "Churn Probability", "Feedback_Churn"] + [col for col in df.columns if col not in ["Churn Prediction", "Churn Probability", "Feedback_Churn"]]
             st.dataframe(df[all_columns])
             
-            # Download button for results
-            csv = df.to_csv(index=False)
             st.download_button(
                 label="Download Results as CSV",
-                data=csv,
+                data=df.to_csv(index=False),
                 file_name="churn_predictions.csv",
                 mime="text/csv"
             )
             
-            # Visual Insights
-            st.subheader("Visual Insights")
+            # Dashboard Sections
+            st.markdown("### Visual Insights Dashboard")
             
-            # 1. Overall Churn Prediction (Bar Chart)
-            st.write("Overall Churn Prediction (Bar Chart)")
-            fig, ax = plt.subplots()
-            sns.countplot(x="Churn Prediction", data=df, ax=ax)
-            ax.set_xlabel("Prediction")
-            ax.set_ylabel("Count")
-            ax.set_title("Churn vs. Stay")
-            st.pyplot(fig)
+            # Section 1: Overall Churn
+            with st.expander("Overall Churn Analysis"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    fig, ax = plt.subplots()
+                    sns.countplot(x="Churn Prediction", data=df, ax=ax)
+                    ax.set_title("Churn vs. Stay (Bar)")
+                    st.pyplot(fig)
+                with col2:
+                    fig, ax = plt.subplots()
+                    df["Churn Prediction"].value_counts().plot(kind="pie", autopct="%1.1f%%", ax=ax)
+                    ax.set_title("Churn vs. Stay (Pie)")
+                    st.pyplot(fig)
             
-            # 2. Overall Churn Prediction (Pie Chart)
-            st.write("Overall Churn Prediction (Pie Chart)")
-            fig, ax = plt.subplots()
-            df["Churn Prediction"].value_counts().plot(kind="pie", autopct="%1.1f%%", ax=ax)
-            ax.set_title("Churn vs. Stay Percentage")
-            st.pyplot(fig)
+            # Section 2: Churn by Categories
+            with st.expander("Churn by Categories"):
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    if "Geography" in df.columns:
+                        fig, ax = plt.subplots()
+                        sns.countplot(x="Geography", hue="Churn Prediction", data=df, ax=ax)
+                        ax.set_title("Churn by Geography")
+                        st.pyplot(fig)
+                with col2:
+                    if "AgeGroup" in df.columns:
+                        fig, ax = plt.subplots()
+                        sns.countplot(x="AgeGroup", hue="Churn Prediction", data=df, ax=ax)
+                        ax.set_title("Churn by Age Group")
+                        st.pyplot(fig)
+                with col3:
+                    if "NumOfProducts" in df.columns:
+                        fig, ax = plt.subplots()
+                        sns.countplot(x="NumOfProducts", hue="Churn Prediction", data=df, ax=ax)
+                        ax.set_title("Churn by Products")
+                        st.pyplot(fig)
             
-            # 3. Churn Probability Histogram
-            st.write("Churn Probability Histogram")
-            fig, ax = plt.subplots()
-            sns.histplot(probabilities, bins=20, kde=True, ax=ax)
-            ax.set_xlabel("Churn Probability")
-            ax.set_ylabel("Count")
-            ax.set_title("Distribution of Churn Probabilities")
-            st.pyplot(fig)
+            # Section 3: Churn vs. Activity and Sentiment
+            with st.expander("Churn vs. Activity & Sentiment"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    if "IsActiveMember" in df.columns:
+                        df["IsActiveMember"] = df["IsActiveMember"].map({0: "Inactive", 1: "Active"})
+                        fig, ax = plt.subplots()
+                        sns.countplot(x="IsActiveMember", hue="Churn Prediction", data=df, ax=ax)
+                        ax.set_title("Churn vs. Activity")
+                        st.pyplot(fig)
+                with col2:
+                    if "Sentiment_Polarity" in df.columns:
+                        fig, ax = plt.subplots()
+                        sns.boxplot(x="Churn Prediction", y="Sentiment_Polarity", data=df, ax=ax)
+                        ax.set_title("Churn by Sentiment (Box)")
+                        st.pyplot(fig)
             
-            # 4. Churn by Geography
-            st.write("Churn by Geography")
-            if "Geography" in df.columns:
-                fig, ax = plt.subplots()
-                sns.countplot(x="Geography", hue="Churn Prediction", data=df, ax=ax)
-                ax.set_xlabel("Geography")
-                ax.set_ylabel("Count")
-                ax.set_title("Churn by Geography")
-                st.pyplot(fig)
+            # Section 4: Advanced Plots
+            with st.expander("Advanced Visualizations"):
+                col1, col2 = st.columns(2)
+                with col1:
+                    if "Churn Probability" in df.columns:
+                        fig, ax = plt.subplots()
+                        sns.violinplot(x="Churn Prediction", y="Churn Probability", data=df, ax=ax)
+                        ax.set_title("Churn Probability (Violin)")
+                        st.pyplot(fig)
+                with col2:
+                    if "Sentiment_Polarity" in df.columns:
+                        fig, ax = plt.subplots()
+                        sns.histplot(df["Sentiment_Polarity"], bins=20, kde=True, ax=ax)
+                        ax.set_title("Sentiment Distribution")
+                        st.pyplot(fig)
             
-            # 5. Churn by Age Group
-            st.write("Churn by Age Group")
-            if "AgeGroup" in df.columns:
-                fig, ax = plt.subplots()
-                sns.countplot(x="AgeGroup", hue="Churn Prediction", data=df, ax=ax)
-                ax.set_xlabel("Age Group")
-                ax.set_ylabel("Count")
-                ax.set_title("Churn by Age Group")
-                st.pyplot(fig)
+            # Section 5: High-Risk Customers
+            with st.expander("High-Risk Customers"):
+                high_risk = df[df["Churn Probability"] > 0.5]
+                if not high_risk.empty:
+                    st.markdown("Customers with Churn Probability > 0.5:")
+                    st.dataframe(high_risk[["CustomerId", "Churn Prediction", "Churn Probability", "Geography", "Age", "NumOfProducts", "IsActiveMember", "Sentiment_Polarity", "Feedback_Churn"]])
+                else:
+                    st.markdown("No high-risk customers found.")
             
-            # 6. Churn by Number of Products
-            st.write("Churn by Number of Products")
-            if "NumOfProducts" in df.columns:
-                fig, ax = plt.subplots()
-                sns.countplot(x="NumOfProducts", hue="Churn Prediction", data=df, ax=ax)
-                ax.set_xlabel("Number of Products")
-                ax.set_ylabel("Count")
-                ax.set_title("Churn by Number of Products")
-                st.pyplot(fig)
+            # Section 6: Prediction Accuracy (if feedback churn data exists)
+            if "Feedback_Churn" in df.columns and -1 not in df["Feedback_Churn"].values:
+                with st.expander("Prediction Accuracy"):
+                    from sklearn.metrics import accuracy_score
+                    actual_churn = df["Feedback_Churn"].astype(int)
+                    predicted_churn = df["Churn Prediction"].map({"Stay": 0, "Churn": 1})
+                    acc = accuracy_score(actual_churn, predicted_churn)
+                    st.markdown(f"Accuracy compared to feedback churn: {acc:.2f}")
             
-            # 7. Churn vs. Activity
-            st.write("Churn vs. Activity")
-            if "IsActiveMember" in df.columns:
-                df["IsActiveMember"] = df["IsActiveMember"].map({0: "Inactive", 1: "Active"})
-                fig, ax = plt.subplots()
-                sns.countplot(x="IsActiveMember", hue="Churn Prediction", data=df, ax=ax)
-                ax.set_xlabel("Activity Status")
-                ax.set_ylabel("Count")
-                ax.set_title("Churn vs. Activity")
-                st.pyplot(fig)
-            
-            # 8. Highlight High-Risk Customers
-            st.subheader("High-Risk Customers")
-            high_risk = df[df["Churn Probability"] > 0.5]
-            if not high_risk.empty:
-                st.write("Customers with Churn Probability > 0.5:")
-                st.dataframe(high_risk[["CustomerId", "Churn Prediction", "Churn Probability"] + ["Geography", "Age", "NumOfProducts", "IsActiveMember"]])
-            else:
-                st.write("No high-risk customers found.")
-            
-            # 9. Feature Importance (XGBoost specific)
-            try:
-                feature_importance = model.feature_importances_
-                feature_names = df_processed.columns
-                importance_df = pd.DataFrame({
-                    "Feature": feature_names,
-                    "Importance": feature_importance
-                }).sort_values(by="Importance", ascending=False)
-                
-                st.write("Feature Importance")
-                fig, ax = plt.subplots()
-                sns.barplot(x="Importance", y="Feature", data=importance_df.head(10), ax=ax)
-                ax.set_title("Top 10 Features for Churn Prediction")
-                st.pyplot(fig)
-            except AttributeError:
-                st.error("Feature importance not available")
+            # Section 7: Feature Importance
+            with st.expander("Feature Importance"):
+                try:
+                    feature_importance = model.feature_importances_
+                    feature_names = df_processed.columns
+                    importance_df = pd.DataFrame({"Feature": feature_names, "Importance": feature_importance}).sort_values(by="Importance", ascending=False)
+                    fig, ax = plt.subplots()
+                    sns.barplot(x="Importance", y="Feature", data=importance_df.head(10), ax=ax)
+                    ax.set_title("Top 10 Features")
+                    st.pyplot(fig)
+                except AttributeError:
+                    st.error("Feature importance not available")
                 
     except Exception as e:
         st.error(f"Error processing the file: {str(e)}")
 else:
-    st.info("Please upload a CSV file to predict churn.")
+    st.sidebar.info("Please upload customer data and feedback data to start the analysis.")
