@@ -2,7 +2,7 @@
 
 An interactive **Streamlit dashboard** that predicts customer churn using a machine learning model, enhanced with **sentiment analysis** from customer feedback.
 
-🔗 **Live App**: [churn-analysis-dashboard.onrender.com]([https://churn-analysis-dashboard.onrender.com](https://churn-analysis-dashboard.onrender.com/))
+🔗 **Live App**: [churn-analysis-dashboard.onrender.com](https://churn-analysis-dashboard.onrender.com/)
 
 ---
 
@@ -31,9 +31,6 @@ An interactive **Streamlit dashboard** that predicts customer churn using a mach
 
 ![High Risk](https://github.com/Ramanees/Churn-Streamlit-App/blob/main/screenshots/Screenshot%20(38).png)
 
-### 💡 Feature Importance
-
-![Feature Importance](./screenshots/feature_importance.png)
 
 ---
 
