@@ -21,15 +21,15 @@ An interactive **Streamlit dashboard** that predicts customer churn using a mach
 
 ### 🔍 Overview & Churn Analysis
 
-![Overall Churn Analysis](./screenshots/Screenshot(35).png)
+![Overall Churn Analysis](https://github.com/Ramanees/Churn-Streamlit-App/blob/main/screenshots/Screenshot%20(35).png)
 
 ### 📊 By Category & Sentiment
 
-![Churn Categories](./screenshots/churn_by_categories.png)
+![Churn Categories](https://github.com/Ramanees/Churn-Streamlit-App/blob/main/screenshots/Screenshot%20(36).png)
 
 ### ⚠️ High-Risk Customers
 
-![High Risk](./screenshots/high_risk_customers.png)
+![High Risk](https://github.com/Ramanees/Churn-Streamlit-App/blob/main/screenshots/Screenshot%20(38).png)
 
 ### 💡 Feature Importance
 
