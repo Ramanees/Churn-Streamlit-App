@@ -21,7 +21,7 @@ An interactive **Streamlit dashboard** that predicts customer churn using a mach
 
 ### 🔍 Overview & Churn Analysis
 
-![Overall Churn Analysis](./screenshots/overall_churn_analysis.png)
+![Overall Churn Analysis](./screenshots/Screenshot(35).png)
 
 ### 📊 By Category & Sentiment
 
